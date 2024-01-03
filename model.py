@@ -1,4 +1,5 @@
 import json
+import toml
 
 # coding: utf-8
 from sqlalchemy import CHAR, CheckConstraint, Column, Date, DateTime, Enum, Float, String, TIMESTAMP, Table, Text, Time, text, ForeignKey
@@ -409,7 +410,9 @@ class Round(Base):
 
     @staticmethod
     def download(round_id):
-        engine = create_engine("mysql+mysqldb://root@localhost/parastats_prod")
+        config = toml.load(open('config.toml'))
+        connection_string = config['database']['connection_string']
+        engine = create_engine(connection_string)
         session = Session(engine)
 
         if session.get(Round, round_id):

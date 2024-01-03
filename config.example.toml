@@ -1,0 +1,2 @@
+[database]
+connection_string = "mysql+mysqldb://root@localhost/parastats_prod"

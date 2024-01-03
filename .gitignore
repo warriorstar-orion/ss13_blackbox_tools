@@ -1,0 +1,6 @@
+*.log
+*.sqlite
+__pycache__
+config.toml
+
+.ipynb_checkpoints
