@@ -399,7 +399,7 @@ class Round(Base):
     station_name = Column(String(80))
     server_id = Column(String(50))
 
-    feedbacks:Mapped[List["Feedback"]] = relationship(back_populates="round")
+    feedbacks:Mapped[List["Feedback"]] = relationship(back_populates="round", innerjoin=True, lazy='joined')
     populations:Mapped[List["LegacyPopulation"]] = relationship(
         "LegacyPopulation",
         primaryjoin='and_(LegacyPopulation.time>=Round.initialize_datetime, LegacyPopulation.time<=Round.shutdown_datetime)',
