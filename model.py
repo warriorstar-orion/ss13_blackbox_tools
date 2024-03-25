@@ -3,16 +3,14 @@ import toml
 
 # coding: utf-8
 from sqlalchemy import CHAR, CheckConstraint, Column, Date, DateTime, Enum, Float, String, TIMESTAMP, Table, Text, Time, text, ForeignKey
-from sqlalchemy.dialects.mysql import BIGINT, BIT, ENUM, INTEGER, LONGTEXT, MEDIUMINT, MEDIUMTEXT, SMALLINT, TINYINT, VARCHAR
+from sqlalchemy.dialects.mysql import BIGINT, BIT, ENUM, INTEGER, LONGTEXT, MEDIUMINT, MEDIUMTEXT, SMALLINT, TINYINT, VARCHAR, JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, relationship, mapped_column
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 
+from request_mixin import make_cached_limiter_session
 
-import requests_cache
-
-rq_session = requests_cache.CachedSession('api_paradisestation_org_roundstat')
 API_URL = "https://api.paradisestation.org/stats"
 
 from typing import List
@@ -223,9 +221,18 @@ class Feedback(Base):
     key_name = Column(String(32), nullable=False)
     key_type = Column(Enum('text', 'amount', 'tally', 'nested tally', 'associative'), nullable=False)
     version = Column(TINYINT(3), nullable=False)
-    json = Column(LONGTEXT, nullable=False)
+    json = Column(JSON, nullable=False)
 
     round:Mapped["Round"] = relationship(back_populates="feedbacks")
+
+    def __str__(self):
+        return f"<Fdbk Rnd#{self.round_id} {self.key_name}>"
+    
+    def __repr__(self):
+        return self.__str__()
+
+    def __getitem__(self, key):
+        return self.json['data'].__getitem__(key)
 
 
 class InstanceDataCache(Base):
@@ -408,10 +415,14 @@ class Round(Base):
         uselist=True,
     )
 
+    def __repr__(self):
+        return f"<Round#{self.id} [{self.start_datetime.strftime('%Y-%m-%d')}] {self.game_mode}/{self.map_name}>"
+
     @staticmethod
     def download(round_id):
+        rq_session = make_cached_limiter_session()
         config = toml.load(open('config.toml'))
-        connection_string = config['database']['connection_string']
+        connection_string = config['database']['prod_connection_string']
         engine = create_engine(connection_string)
         session = Session(engine)
 
@@ -464,15 +475,9 @@ class Round(Base):
             t.commit()
 
     def get_feedback_stat(self, k):
-        if not hasattr(self, '_feedback_cache'):
-            self._feedback_cache = dict()
-
-        if k not in self._feedback_cache:
-            for x in self.feedbacks:
-                if x.key_name == k:
-                    self._feedback_cache[k] = json.loads(str(x.json))['data']
-
-        return self._feedback_cache[k]
+        for x in self.feedbacks:
+            if x.key_name == k:
+                return x
 
     def has_feedback_stat(self, name):
         for x in self.feedbacks:
