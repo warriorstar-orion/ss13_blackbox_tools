@@ -1,4 +1,5 @@
 import json
+from functools import cache
 import toml
 
 # coding: utf-8
@@ -9,11 +10,11 @@ from sqlalchemy.orm import Mapped, relationship, mapped_column
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 
-from request_mixin import make_cached_limiter_session
-
 API_URL = "https://api.paradisestation.org/stats"
 
 from typing import List
+
+from blackbox import RoundWinner
 
 Base = declarative_base()
 metadata = Base.metadata
@@ -233,6 +234,19 @@ class Feedback(Base):
 
     def __getitem__(self, key):
         return self.json['data'].__getitem__(key)
+    
+    @cache
+    def json_data(self):
+        return self.json['data']
+    
+    def keys(self):
+        return self.json_data().keys()
+    
+    def values(self):
+        return self.json_data().values()
+    
+    def items(self):
+        return self.json_data().items()
 
 
 class InstanceDataCache(Base):
@@ -268,6 +282,19 @@ class LegacyPopulation(Base):
     admincount = Column(INTEGER(11))
     server_id = Column(String(50))
     time = Column(DateTime, nullable=False)
+    round = relationship(
+        "Round",
+        primaryjoin='and_(LegacyPopulation.time>=foreign(Round.initialize_datetime), LegacyPopulation.time<=foreign(Round.shutdown_datetime))',
+        back_populates='populations',
+        viewonly=True,
+        uselist=False
+    )
+
+    def __str__(self):
+        return f"<Players {self.playercount: >3}@{self.time.strftime('%Y-%m-%d %H:%M:%S')}>"
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class Library(Base):
@@ -419,22 +446,15 @@ class Round(Base):
         return f"<Round#{self.id} [{self.start_datetime.strftime('%Y-%m-%d')}] {self.game_mode}/{self.map_name}>"
 
     @staticmethod
-    def download(round_id):
-        rq_session = make_cached_limiter_session()
-        config = toml.load(open('config.toml'))
-        connection_string = config['database']['prod_connection_string']
-        engine = create_engine(connection_string)
-        session = Session(engine)
+    def download(engine, round_id, rq_session):
+        with Session(engine, expire_on_commit=False) as session:
+            if session.get(Round, round_id):
+                return False
 
-        if session.get(Round, round_id):
-            return
+            mtd = rq_session.get(f"{API_URL}/metadata/{round_id}").json()
+            pct = rq_session.get(f"{API_URL}/playercounts/{round_id}").json()
+            bbl = rq_session.get(f"{API_URL}/blackbox/{round_id}").json()
 
-        print(f"getting round {round_id}")
-        mtd = rq_session.get(f"{API_URL}/metadata/{round_id}").json()
-        pct = rq_session.get(f"{API_URL}/playercounts/{round_id}").json()
-        bbl = rq_session.get(f"{API_URL}/blackbox/{round_id}").json()
-
-        with Session(engine, expire_on_commit=False) as t:
             rnd = Round(
                 id=mtd["round_id"],
                 initialize_datetime=mtd["init_datetime"],
@@ -466,34 +486,36 @@ class Round(Base):
                     key_name=row["key_name"],
                     key_type=row["key_type"],
                     version=row["version"],
-                    json=row["raw_data"],
+                    json=json.loads(row["raw_data"]),
                 
                     datetime=mtd["init_datetime"])
                 data.append(fb)
 
-            t.add_all([rnd] + pcts + data)
-            t.commit()
+            session.add_all([rnd] + pcts + data)
+            session.commit()
 
-    def get_feedback_stat(self, k):
+            return True
+
+    def feedback(self, k):
         for x in self.feedbacks:
             if x.key_name == k:
                 return x
 
-    def has_feedback_stat(self, name):
-        for x in self.feedbacks:
-            if x.key_name == name:
-                return True
-        return False
+    def has_feedback(self, name):
+        return any(x.key_name == name for x in self.feedbacks)
 
     def roundstart_ready_count(self, with_assts=False):
+        if not self.has_feedback('job_preferences'):
+            return None
+        
         if with_assts:
-            return self.get_feedback_stat('job_preferences')['Nanotrasen Navy Officer']['never']
+            return self.feedback('job_preferences')['Nanotrasen Navy Officer']['never']
 
-        return self.get_feedback_stat('job_preferences')['Assistant']['never']
+        return self.feedback('job_preferences')['Assistant']['never']
     
     def has_testmerge(self, pr_id):
-        if self.has_feedback_stat('testmerged_prs'):
-            tprs = self.get_feedback_stat('testmerged_prs')
+        if self.has_feedback('testmerged_prs'):
+            tprs = self.feedback('testmerged_prs')
             for pr in tprs.values():
                 if pr['number'] == str(pr_id):
                     return True
@@ -503,11 +525,32 @@ class Round(Base):
     @property
     def roundstart_client_count(self):
         return sorted(self.populations, key=lambda x:x.time)[0].playercount
+    
+    @property
+    def highest_player_count(self):
+        return max(p.playercount for p in self.populations)
 
     def roundstart_job_count(self, with_assts=False):
         if with_assts:
             return sum([y.get("roundstart", 0) for x,y in self.get_feedback_stat('manifest').items()])
         return sum([y.get("roundstart", 0) for x,y in self.get_feedback_stat('manifest').items() if x != 'Assistant'])
+    
+    def winner(self) -> RoundWinner:
+        if self.game_mode_result == "undefined":
+            return RoundWinner.UNKNOWN
+        if self.game_mode_result.startswith("cult win"):
+            return RoundWinner.CULT
+        if self.game_mode_result.startswith("revolution win"):
+            return RoundWinner.REVOLUTIONARIES
+        if self.game_mode_result.startswith("nuclear win"):
+            return RoundWinner.NUKIES
+        if self.game_mode_result.startswith("nuclear halfwin"):
+            return RoundWinner.NUKIES_MINOR
+        if self.game_mode == "wizard" and not self.game_mode_result.startswith("wizard loss"):
+            return RoundWinner.WIZARD
+        
+        return RoundWinner.CREW
+
 
 t_snapshot_data = Table(
     'snapshot_data', metadata,

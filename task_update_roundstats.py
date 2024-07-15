@@ -1,14 +1,11 @@
 from datetime import timedelta
-import json
 
 from loguru import logger
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 
 from request_mixin import make_cached_limiter_session
-import requests_cache
 import toml
 
 from model import Round
@@ -24,15 +21,13 @@ def main():
     rq_session = make_cached_limiter_session()
 
     engine = create_engine(connection_string)
-    session = Session(engine)
     logger.info("getting roundstats")
-    rounds = rq_session.get(f"{API_URL}/roundlist?offset=38348", expire_after=timedelta(hours=1)).json()
+    rounds = rq_session.get(f"{API_URL}/roundlist", expire_after=timedelta(hours=1)).json()
     for round in rounds:
         round_id = round['round_id']
-        r = session.get(Round, round_id)
-        if not r:
-            logger.info(f"getting stats round_id={round_id}")
-            Round.download(round_id)
+        downloaded = Round.download(engine, round_id, rq_session)
+        if downloaded:
+            logger.info(f"downloaded round_id={round_id}")
 
 if __name__ == "__main__":
     main()
