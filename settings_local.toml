@@ -1,0 +1,6 @@
+[ss13tools]
+api_url = ""
+working_directory = "D:/ExternalRepos/ss13_blackbox_tools"
+log_tasks = true
+paradise_root = "D:/ExternalRepos/third_party/Paradise"
+connection_string = "mysql+mysqldb://root@localhost/paradise_gamedb"

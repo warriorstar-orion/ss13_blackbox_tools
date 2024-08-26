@@ -11,7 +11,6 @@ class CachedLimiterSession(CacheMixin, LimiterMixin, Session):
 
 
 def make_cached_limiter_session():
-    # Optionally use SQLite as both the bucket backend and the cache backend
     return CachedLimiterSession(
         per_minute=500,
         per_hour=3600,
