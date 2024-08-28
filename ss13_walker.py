@@ -1,4 +1,4 @@
-from avulto import DMM, DME, DMI, Path as p, Dir, dmlist
+dfrom avulto import DMM, DME, DMI, Path as p, Dir, dmlist
 from avulto.ast import Prefab, Attribute, Identifier
 import random
 
