@@ -11,6 +11,7 @@ class SS13ToolsSettings:
     log_tasks: bool
     paradise_root: Path
     connection_string: str = ts.secret()
+    profile_proc_paths: list[str]
 
     def api_cache(self):
         return self.working_directory / "api_paradisestation_org_roundstat.sqlite"

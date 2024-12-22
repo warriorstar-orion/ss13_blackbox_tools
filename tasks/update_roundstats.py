@@ -37,7 +37,7 @@ def main(settings_file):
     api_url = settings.api_url
     logger.info("getting roundstats...")
     # while earliest_download > STOP_DATE:
-    rounds = rq_session.get(f"{api_url}/roundlist", expire_after=timedelta(hours=1)).json()
+    rounds = rq_session.get(f"{api_url}/stats/roundlist", expire_after=timedelta(hours=1)).json()
     for round in rounds:
         round_id = round['round_id']
         logger.info(f"round_id={round_id}")
